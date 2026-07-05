@@ -1,0 +1,9 @@
+# Ambienti virtuali (Python)
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+
+# File di configurazione segreti
+.env

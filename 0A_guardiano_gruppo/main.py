@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 
 load_dotenv()
 
@@ -33,6 +33,40 @@ async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) 
         reply_markup = keyboard
     )
 
+async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    clicked_user_id = int(query.data.split("_")[1])
+
+    if query.from_user.id != clicked_user_id:
+        await query.answer("Questo pulsante non è per te!", show_alert=True)
+        return
+
+    chat_id = query.message.chat.id
+
+    try:
+        await context.bot.restrict_chat_member(
+            chat_id = chat_id,
+            user_id = clicked_user_id,
+            permissions = ChatPermissions(
+                can_send_messages=True,
+                can_send_photos=True,
+                can_send_polls=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True
+            )
+        )
+    except Exception as e:
+        print(f"Errore durante il ripristino permessi di {query.from_user.first_name} (ID: {query.from_user.id}): {e}")
+
+    await query.message.delete()
+
+    conferma = await context.bot.send_message(
+        chat_id = chat_id,
+        text = f"✅ Benvenuto {query.from_user.first_name}! Ora puoi scrivere"
+    )
+
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for member in update.message.new_chat_members:
         await process_new_member(member, update.effective_chat.id, context)
@@ -59,6 +93,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
     app.add_handler(CommandHandler("simula_ingresso", simula_ingresso))
+    app.add_handler(CallbackQueryHandler(verify_button))
     print("Bot avviato. In attesa di comandi...")
     app.run_polling()
 

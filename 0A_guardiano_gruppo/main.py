@@ -6,6 +6,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Messa
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+pending_verifications = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_first_name = update.effective_user.first_name
@@ -27,11 +28,36 @@ async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) 
         [InlineKeyboardButton("✅ Clicca qui per dimostrare che sei umano", callback_data=f"verify_{user.id}")]
     ])
 
-    await context.bot.send_message(
+    sent_message = await context.bot.send_message(
         chat_id = chat_id,
         text = f"Benvenuto {user.first_name}! Per favore, dimostra che sei umano cliccando il pulsante qui sotto.",
         reply_markup = keyboard
     )
+
+    pending_verifications[user.id] = {
+        "chat_id": chat_id,
+        "first_name": user.first_name,
+        "message_id": sent_message.message_id
+    }
+
+    context.job_queue.run_once(
+        check_verification,
+        when=60,
+        data={"user_id": user.id, "chat_id": chat_id}
+    )
+
+async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
+    job_data = context.job.data
+    user_id = job_data["user_id"]
+    chat_id = job_data["chat_id"]
+
+    if user_id in pending_verifications:
+        info = pending_verifications[user_id]
+        print(f"Timer scaduto per {info['first_name']} (ID: {user_id}) non ha cliccato in tempo")
+        del pending_verifications[user_id]
+    else:
+        print(f"Utente {user_id} aveva già verificato in tempo, nessuna azione necessaria.")
+
 
 async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -44,6 +70,9 @@ async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> No
         return
 
     chat_id = query.message.chat.id
+
+    if clicked_user_id in pending_verifications:
+        del pending_verifications[clicked_user_id]
 
     try:
         await context.bot.restrict_chat_member(

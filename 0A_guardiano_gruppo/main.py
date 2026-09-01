@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, ChatPermissions
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 load_dotenv()
@@ -12,7 +12,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Ciao {user_first_name}! Sono il tuo guardiano del gruppo. Come posso aiutarti oggi?")
 
 async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"Nuovo membro rilevato: {user.first_name} (ID: {user.id}) nel gruppo {chat_id}")
+    muted_permissions = ChatPermissions(can_send_messages=False)
+    try:
+        await context.bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=user.id,
+            permissions=muted_permissions
+        )
+        print(f"Utente {user.first_name} (ID: {user.id}) è stato silenziato nel gruppo {chat_id}.")
+    except Exception as e:
+        print(f"Errore durante il silenziamento dell'utente {user.first_name} (ID: {user.id}): {e}")
 
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for member in update.message.new_chat_members:

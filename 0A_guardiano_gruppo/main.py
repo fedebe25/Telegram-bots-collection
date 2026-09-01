@@ -137,20 +137,15 @@ async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> No
 
     await query.message.delete()
 
-    conferma = await context.bot.send_message(
+    await context.bot.send_message(
         chat_id = chat_id,
         text = f"✅ Benvenuto {query.from_user.first_name}! Ora puoi scrivere"
     )
 
+    
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for member in update.message.new_chat_members:
         await process_new_member(member, update.effective_chat.id, context)
-
-async def simula_ingresso(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    fake_user = update.effective_user
-    chat_id = update.effective_chat.id
-    await process_new_member(fake_user, chat_id, context)
-    await update.message.reply_text("✅ Simulazione ingresso eseguita (solo debug).")
 
 def main() -> None:
     if not TOKEN:
@@ -167,7 +162,6 @@ def main() -> None:
 )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
-    app.add_handler(CommandHandler("simula_ingresso", simula_ingresso))
     app.add_handler(CallbackQueryHandler(verify_button))
     print("Bot avviato. In attesa di comandi...")
     app.run_polling()

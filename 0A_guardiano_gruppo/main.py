@@ -6,7 +6,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, Messa
 load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 pending_verifications = {}
+AZIONE_TIMEOUT = "kick"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_first_name = update.effective_user.first_name
@@ -51,12 +53,37 @@ async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = job_data["user_id"]
     chat_id = job_data["chat_id"]
 
-    if user_id in pending_verifications:
-        info = pending_verifications[user_id]
-        print(f"Timer scaduto per {info['first_name']} (ID: {user_id}) non ha cliccato in tempo")
-        del pending_verifications[user_id]
-    else:
+    if user_id not in pending_verifications:
         print(f"Utente {user_id} aveva già verificato in tempo, nessuna azione necessaria.")
+        return
+
+    info = pending_verifications[user_id]
+    first_name = info["first_name"]
+    message_id = info["message_id"]
+    del pending_verifications[user_id]
+
+    print(f"Timer scaduto per {first_name} (ID: {user_id}) - non ha cliccato in tempo. Azione: {AZIONE_TIMEOUT}")
+
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        print(f"Errore durante la cancellazione del messaggio di verifica: {e}")
+
+    if AZIONE_TIMEOUT == "kick":
+        try:
+            await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
+            await context.bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
+            print(f"Utente {first_name} (ID: {user_id}) rimosso dal gruppo per mancata verifica.")
+
+            if ADMIN_CHAT_ID:
+                await context.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=f"⚠️ {first_name} (ID: {user_id}) è stato rimosso dal gruppo per mancata verifica entro 60 secondi."
+                )
+        except Exception as e:
+            print(f"Errore durante la rimozione dell'utente {first_name} (ID: {user_id}): {e}")
+    else:
+        print(f"Utente {first_name} (ID: {user_id}) resta silenziato in attesa di sblocco manuale da un admin.")
 
 
 async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> None:

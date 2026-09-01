@@ -9,12 +9,18 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 pending_verifications = {}
 AZIONE_TIMEOUT = "kick"
+whitelist_raw = os.getenv("WHITELIST_IDS", "")
+WHITELIST_IDS = [int(x.strip()) for x in whitelist_raw.split(",") if x.strip()]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_first_name = update.effective_user.first_name
     await update.message.reply_text(f"Ciao {user_first_name}! Sono il tuo guardiano del gruppo. Come posso aiutarti oggi?")
 
 async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if await is_exempt(user.id, chat_id, context):
+        print(f"Utente {user.first_name} (ID: {user.id}) esentato dalla verifica (admin/whitelist).")
+        return
+
     muted_permissions = ChatPermissions(can_send_messages=False)
     try:
         await context.bot.restrict_chat_member(
@@ -47,6 +53,19 @@ async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) 
         when=60,
         data={"user_id": user.id, "chat_id": chat_id}
     )
+
+async def is_exempt(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if user_id in WHITELIST_IDS:
+        return True
+
+    try:
+        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        if member.status in ("creator", "administrator"):
+            return True
+    except Exception as e:
+        print(f"Errore durante il controllo dello status di {user_id}: {e}")
+
+    return False
 
 async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
     job_data = context.job.data

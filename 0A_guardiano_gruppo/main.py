@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from telegram import Update, ChatPermissions
+from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
 load_dotenv()
@@ -22,6 +22,16 @@ async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) 
         print(f"Utente {user.first_name} (ID: {user.id}) è stato silenziato nel gruppo {chat_id}.")
     except Exception as e:
         print(f"Errore durante il silenziamento dell'utente {user.first_name} (ID: {user.id}): {e}")
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Clicca qui per dimostrare che sei umano", callback_data=f"verify_{user.id}")]
+    ])
+
+    await context.bot.send_message(
+        chat_id = chat_id,
+        text = f"Benvenuto {user.first_name}! Per favore, dimostra che sei umano cliccando il pulsante qui sotto.",
+        reply_markup = keyboard
+    )
 
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for member in update.message.new_chat_members:

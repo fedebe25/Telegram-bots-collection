@@ -1,5 +1,7 @@
 import os
 import json
+import time
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
@@ -10,6 +12,10 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 pending_verifications = {}
 AZIONE_TIMEOUT = "kick"
+FLOOD_MAX_MESSAGES = 5
+FLOOD_TIME_WINDOW = 10
+FLOOD_MUTE_MINUTES = 5
+message_timestamps = {}
 whitelist_raw = os.getenv("WHITELIST_IDS", "")
 WHITELIST_IDS = [int(x.strip()) for x in whitelist_raw.split(",") if x.strip()]
 
@@ -219,6 +225,42 @@ async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) 
         data={"user_id": user.id, "chat_id": chat_id}
     )
 
+async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    chat_id = update.effective_chat.id
+
+    print(f"[DEBUG] check_flood chiamata per {user.first_name}")
+
+    if await is_exempt(user.id, chat_id, context):
+        print(f"[DEBUG] {user.first_name} è esente, flood non controllato")
+        return
+
+    key = f"{chat_id}_{user.id}"
+    now = time.time()
+
+    if key not in message_timestamps:
+        message_timestamps[key] = []
+
+    message_timestamps[key].append(now)
+    message_timestamps[key] = [t for t in message_timestamps[key] if now - t <= FLOOD_TIME_WINDOW]
+    print(f"[DEBUG] {user.first_name}: {len(message_timestamps[key])} messaggi negli ultimi {FLOOD_TIME_WINDOW}s")
+
+    if len(message_timestamps[key]) > FLOOD_MAX_MESSAGES:
+        message_timestamps[key] = []
+
+        try:
+            until = datetime.now() + timedelta(minutes=FLOOD_MUTE_MINUTES)
+            await context.bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=user.id,
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until
+            )
+            await update.message.reply_text(f"🔇 {user.first_name} silenziato per {FLOOD_MUTE_MINUTES} minuti (troppi messaggi in poco tempo).")
+            print(f"Flood rilevato: {user.first_name} (ID: {user.id}) mutato per {FLOOD_MUTE_MINUTES} minuti.")
+        except Exception as e:
+            print(f"Errore durante il mute anti-flood di {user.first_name} (ID: {user.id}): {e}")
+
 async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
     job_data = context.job.data
     user_id = job_data["user_id"]
@@ -320,6 +362,7 @@ def main() -> None:
     app.add_handler(CommandHandler("whitelist_list", whitelist_list))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
     app.add_handler(CallbackQueryHandler(verify_button))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_flood))
     print("Bot avviato. In attesa di comandi...")
     app.run_polling()
 

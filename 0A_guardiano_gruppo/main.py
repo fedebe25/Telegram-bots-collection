@@ -25,11 +25,61 @@ def save_settings(settings: dict) -> None:
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=2)
 
+def get_azione_timeout(chat_id: int) -> str:
+    chat_key = str(chat_id)
+    if chat_key in group_settings and "azione_timeout" in group_settings[chat_key]:
+        return group_settings[chat_key]["azione_timeout"]
+    return AZIONE_TIMEOUT
+
 group_settings = load_settings()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_first_name = update.effective_user.first_name
     await update.message.reply_text(f"Ciao {user_first_name}! Sono il tuo guardiano del gruppo. Come posso aiutarti oggi?")
+
+async def is_admin(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    try:
+        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        return member.status in ("creator", "administrator")
+    except Exception as e:
+        print(f"Errore durante il controllo admin di {user_id}: {e}")
+        return False
+
+async def is_exempt(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    if user_id in WHITELIST_IDS:
+        return True
+
+    try:
+        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
+        if member.status in ("creator", "administrator"):
+            return True
+    except Exception as e:
+        print(f"Errore durante il controllo dello status di {user_id}: {e}")
+
+    return False
+
+async def set_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if not await is_admin(user_id, chat_id, context):
+        await update.message.reply_text("⛔ Solo gli admin possono usare questo comando.")
+        return
+
+    if not context.args or context.args[0].lower() not in ("kick", "mute"):
+        await update.message.reply_text("Uso corretto: /set_timeout kick  oppure  /set_timeout mute")
+        return
+
+    nuova_azione = context.args[0].lower()
+    chat_key = str(chat_id)
+
+    if chat_key not in group_settings:
+        group_settings[chat_key] = {}
+
+    group_settings[chat_key]["azione_timeout"] = nuova_azione
+    save_settings(group_settings)
+
+    await update.message.reply_text(f"✅ Impostazione aggiornata: alla scadenza del timer verrà eseguito \"{nuova_azione}\".")
 
 async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await is_exempt(user.id, chat_id, context):
@@ -69,19 +119,6 @@ async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) 
         data={"user_id": user.id, "chat_id": chat_id}
     )
 
-async def is_exempt(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    if user_id in WHITELIST_IDS:
-        return True
-
-    try:
-        member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
-        if member.status in ("creator", "administrator"):
-            return True
-    except Exception as e:
-        print(f"Errore durante il controllo dello status di {user_id}: {e}")
-
-    return False
-
 async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
     job_data = context.job.data
     user_id = job_data["user_id"]
@@ -96,14 +133,15 @@ async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
     message_id = info["message_id"]
     del pending_verifications[user_id]
 
-    print(f"Timer scaduto per {first_name} (ID: {user_id}) - non ha cliccato in tempo. Azione: {AZIONE_TIMEOUT}")
+    azione = get_azione_timeout(chat_id)
+    print(f"Timer scaduto per {first_name} (ID: {user_id}) - non ha cliccato in tempo. Azione: {azione}")
 
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception as e:
         print(f"Errore durante la cancellazione del messaggio di verifica: {e}")
 
-    if AZIONE_TIMEOUT == "kick":
+    if azione == "kick":
         try:
             await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
             await context.bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
@@ -120,7 +158,7 @@ async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
         print(f"Utente {first_name} (ID: {user_id}) resta silenziato in attesa di sblocco manuale da un admin.")
 
 
-async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> None:
+async def verify_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
 
@@ -176,6 +214,7 @@ def main() -> None:
     .build()
 )
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("set_timeout", set_timeout))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
     app.add_handler(CallbackQueryHandler(verify_button))
     print("Bot avviato. In attesa di comandi...")

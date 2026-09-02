@@ -7,3 +7,4 @@ __pycache__/
 
 # File di configurazione segreti
 .env
+settings.json

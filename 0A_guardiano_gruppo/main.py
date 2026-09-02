@@ -196,6 +196,60 @@ async def whitelist_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lista_testo = "\n".join(str(uid) for uid in extra)
     await update.message.reply_text(f"Utenti in whitelist per questo gruppo:\n{lista_testo}")
 
+async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if not await is_admin(user_id, chat_id, context):
+        await update.message.reply_text("⛔ Solo gli admin possono usare questo comando.")
+        return
+
+    if not update.message.reply_to_message:
+        await update.message.reply_text("Rispondi al messaggio dell'utente che vuoi ammonire con /warn")
+        return
+
+    target_user = update.message.reply_to_message.from_user
+    target_id = target_user.id
+    target_name = target_user.first_name
+
+    if await is_exempt(target_id, chat_id, context):
+        await update.message.reply_text("Non puoi ammonire un admin o un utente in whitelist.")
+        return
+
+    chat_key = str(chat_id)
+    if chat_key not in group_settings:
+        group_settings[chat_key] = {}
+    if "warnings" not in group_settings[chat_key]:
+        group_settings[chat_key]["warnings"] = {}
+
+    user_warnings_key = str(target_id)
+    current_warnings = group_settings[chat_key]["warnings"].get(user_warnings_key, 0) + 1
+    group_settings[chat_key]["warnings"][user_warnings_key] = current_warnings
+    save_settings(group_settings)
+
+    MAX_WARNINGS = 3  # Puoi personalizzarlo o renderlo configurabile
+
+    if current_warnings >= MAX_WARNINGS:
+        # Soglia superata: azione punitiva (es. mute di 15 minuti o kick)
+        group_settings[chat_key]["warnings"][user_warnings_key] = 0  # Reset warn
+        save_settings(group_settings)
+
+        try:
+            until = datetime.now() + timedelta(minutes=15)
+            await context.bot.restrict_chat_member(
+                chat_id=chat_id,
+                user_id=target_id,
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until
+            )
+            await update.message.reply_text(f"⚠️ {target_name} ha raggiunto {MAX_WARNINGS} ammonizioni ed è stato mutato per 15 minuti.")
+            await send_log(context, f"⚠️ WARN LIMIT: {target_name} (ID: {target_id}) ha raggiunto {MAX_WARNINGS} warn ed è stato mutato per 15 min nel gruppo {chat_id}.")
+        except Exception as e:
+            print(f"Errore durante il mute per warning di {target_name}: {e}")
+    else:
+        await update.message.reply_text(f"⚠️ {target_name} è stato ammonito. Warn attivi: {current_warnings}/{MAX_WARNINGS}")
+        await send_log(context, f"⚠️ WARN: {target_name} (ID: {target_id}) ammonito ({current_warnings}/{MAX_WARNINGS}) nel gruppo {chat_id}.")
+
 async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await is_exempt(user.id, chat_id, context):
         print(f"Utente {user.first_name} (ID: {user.id}) esentato dalla verifica (admin/whitelist).")
@@ -371,6 +425,7 @@ def main() -> None:
     app.add_handler(CommandHandler("whitelist_list", whitelist_list))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
     app.add_handler(CallbackQueryHandler(verify_button))
+    app.add_handler(CommandHandler("warn", warn_user))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, check_flood))
     print("Bot avviato. In attesa di comandi...")
     app.run_polling()

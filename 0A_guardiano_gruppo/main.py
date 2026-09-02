@@ -10,10 +10,11 @@ load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 pending_verifications = {}
 AZIONE_TIMEOUT = "kick"
 FLOOD_MAX_MESSAGES = 5
-FLOOD_TIME_WINDOW = 10
+FLOOD_TIME_WINDOW = 3
 FLOOD_MUTE_MINUTES = 5
 message_timestamps = {}
 whitelist_raw = os.getenv("WHITELIST_IDS", "")
@@ -56,6 +57,14 @@ async def is_admin(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         print(f"Errore durante il controllo admin di {user_id}: {e}")
         return False
+
+async def send_log(context: ContextTypes.DEFAULT_TYPE, text: str) -> None:
+    if not LOG_CHANNEL_ID:
+        return
+    try:
+        await context.bot.send_message(chat_id=LOG_CHANNEL_ID, text=text)
+    except Exception as e:
+        print(f"Errore durante l'invio del log al canale: {e}")
 
 async def is_exempt(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TYPE) -> bool:
     if user_id in WHITELIST_IDS:
@@ -229,10 +238,8 @@ async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user = update.effective_user
     chat_id = update.effective_chat.id
 
-    print(f"[DEBUG] check_flood chiamata per {user.first_name}")
 
     if await is_exempt(user.id, chat_id, context):
-        print(f"[DEBUG] {user.first_name} è esente, flood non controllato")
         return
 
     key = f"{chat_id}_{user.id}"
@@ -243,7 +250,6 @@ async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     message_timestamps[key].append(now)
     message_timestamps[key] = [t for t in message_timestamps[key] if now - t <= FLOOD_TIME_WINDOW]
-    print(f"[DEBUG] {user.first_name}: {len(message_timestamps[key])} messaggi negli ultimi {FLOOD_TIME_WINDOW}s")
 
     if len(message_timestamps[key]) > FLOOD_MAX_MESSAGES:
         message_timestamps[key] = []
@@ -258,6 +264,7 @@ async def check_flood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             await update.message.reply_text(f"🔇 {user.first_name} silenziato per {FLOOD_MUTE_MINUTES} minuti (troppi messaggi in poco tempo).")
             print(f"Flood rilevato: {user.first_name} (ID: {user.id}) mutato per {FLOOD_MUTE_MINUTES} minuti.")
+            await send_log(context, f"🔇 FLOOD: {user.first_name} (ID: {user.id}) mutato {FLOOD_MUTE_MINUTES} min nel gruppo {chat_id}.")
         except Exception as e:
             print(f"Errore durante il mute anti-flood di {user.first_name} (ID: {user.id}): {e}")
 
@@ -294,6 +301,8 @@ async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
                     chat_id=ADMIN_CHAT_ID,
                     text=f"⚠️ {first_name} (ID: {user_id}) è stato rimosso dal gruppo per mancata verifica entro 60 secondi."
                 )
+            await send_log(context, f"Utente {first_name} (ID: {user_id}) rimosso dal gruppo per mancata verifica.")
+
         except Exception as e:
             print(f"Errore durante la rimozione dell'utente {first_name} (ID: {user_id}): {e}")
     else:

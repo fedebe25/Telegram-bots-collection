@@ -31,6 +31,12 @@ def get_azione_timeout(chat_id: int) -> str:
         return group_settings[chat_key]["azione_timeout"]
     return AZIONE_TIMEOUT
 
+def get_whitelist_extra(chat_id: int) -> list:
+    chat_key = str(chat_id)
+    if chat_key in group_settings and "whitelist_extra" in group_settings[chat_key]:
+        return group_settings[chat_key]["whitelist_extra"]
+    return []
+
 group_settings = load_settings()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -49,6 +55,9 @@ async def is_exempt(user_id: int, chat_id: int, context: ContextTypes.DEFAULT_TY
     if user_id in WHITELIST_IDS:
         return True
 
+    if user_id in get_whitelist_extra(chat_id):
+        return True
+
     try:
         member = await context.bot.get_chat_member(chat_id=chat_id, user_id=user_id)
         if member.status in ("creator", "administrator"):
@@ -63,7 +72,7 @@ async def set_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_id = update.effective_user.id
 
     if not await is_admin(user_id, chat_id, context):
-        await update.message.reply_text("⛔ Solo gli admin possono usare questo comando.")
+        await update.message.reply_text("⛔ Solo gli admin s usare questo comando.")
         return
 
     if not context.args or context.args[0].lower() not in ("kick", "mute"):
@@ -80,6 +89,97 @@ async def set_timeout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     save_settings(group_settings)
 
     await update.message.reply_text(f"✅ Impostazione aggiornata: alla scadenza del timer verrà eseguito \"{nuova_azione}\".")
+
+async def whitelist_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if not await is_admin(user_id, chat_id, context):
+        await update.message.reply_text("⛔ Solo gli admin possono usare questo comando.")
+        return
+
+    target_id = None
+    target_name = None
+
+    if update.message.reply_to_message:
+        target_user = update.message.reply_to_message.from_user
+        target_id = target_user.id
+        target_name = target_user.first_name
+    elif context.args:
+        try:
+            target_id = int(context.args[0])
+            target_name = str(target_id)
+        except ValueError:
+            await update.message.reply_text("ID non valido. Usa un numero, oppure rispondi al messaggio della persona.")
+            return
+    else:
+        await update.message.reply_text("Rispondi al messaggio della persona da aggiungere, oppure scrivi: /whitelist_add <id>")
+        return
+
+    chat_key = str(chat_id)
+    if chat_key not in group_settings:
+        group_settings[chat_key] = {}
+    if "whitelist_extra" not in group_settings[chat_key]:
+        group_settings[chat_key]["whitelist_extra"] = []
+
+    if target_id in group_settings[chat_key]["whitelist_extra"]:
+        await update.message.reply_text(f"{target_name} è già in whitelist.")
+        return
+
+    group_settings[chat_key]["whitelist_extra"].append(target_id)
+    save_settings(group_settings)
+
+    await update.message.reply_text(f"✅ {target_name} (ID: {target_id}) aggiunto alla whitelist.")
+
+async def whitelist_remove(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if not await is_admin(user_id, chat_id, context):
+        await update.message.reply_text("⛔ Solo gli admin possono usare questo comando.")
+        return
+
+    target_id = None
+
+    if update.message.reply_to_message:
+        target_id = update.message.reply_to_message.from_user.id
+    elif context.args:
+        try:
+            target_id = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("ID non valido. Usa un numero, oppure rispondi al messaggio della persona.")
+            return
+    else:
+        await update.message.reply_text("Rispondi al messaggio della persona da rimuovere, oppure scrivi: /whitelist_remove <id>")
+        return
+
+    chat_key = str(chat_id)
+
+    if chat_key not in group_settings or target_id not in group_settings[chat_key].get("whitelist_extra", []):
+        await update.message.reply_text("Questo utente non è in whitelist.")
+        return
+
+    group_settings[chat_key]["whitelist_extra"].remove(target_id)
+    save_settings(group_settings)
+
+    await update.message.reply_text(f"✅ Utente (ID: {target_id}) rimosso dalla whitelist.")
+
+async def whitelist_list(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if not await is_admin(user_id, chat_id, context):
+        await update.message.reply_text("⛔ Solo gli admin possono usare questo comando.")
+        return
+
+    extra = get_whitelist_extra(chat_id)
+
+    if not extra:
+        await update.message.reply_text("Nessun utente extra in whitelist per questo gruppo.")
+        return
+
+    lista_testo = "\n".join(str(uid) for uid in extra)
+    await update.message.reply_text(f"Utenti in whitelist per questo gruppo:\n{lista_testo}")
 
 async def process_new_member(user, chat_id, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await is_exempt(user.id, chat_id, context):
@@ -215,6 +315,9 @@ def main() -> None:
 )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("set_timeout", set_timeout))
+    app.add_handler(CommandHandler("whitelist_add", whitelist_add))
+    app.add_handler(CommandHandler("whitelist_remove", whitelist_remove))
+    app.add_handler(CommandHandler("whitelist_list", whitelist_list))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
     app.add_handler(CallbackQueryHandler(verify_button))
     print("Bot avviato. In attesa di comandi...")

@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
@@ -11,6 +12,20 @@ pending_verifications = {}
 AZIONE_TIMEOUT = "kick"
 whitelist_raw = os.getenv("WHITELIST_IDS", "")
 WHITELIST_IDS = [int(x.strip()) for x in whitelist_raw.split(",") if x.strip()]
+
+SETTINGS_FILE = "settings.json"
+
+def load_settings() -> dict:
+    if not os.path.exists(SETTINGS_FILE):
+        return {}
+    with open(SETTINGS_FILE, "r") as f:
+        return json.load(f)
+
+def save_settings(settings: dict) -> None:
+    with open(SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=2)
+
+group_settings = load_settings()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_first_name = update.effective_user.first_name
@@ -142,7 +157,7 @@ async def verify_button(update: Update, context:ContextTypes.DEFAULT_TYPE) -> No
         text = f"✅ Benvenuto {query.from_user.first_name}! Ora puoi scrivere"
     )
 
-    
+
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     for member in update.message.new_chat_members:
         await process_new_member(member, update.effective_chat.id, context)

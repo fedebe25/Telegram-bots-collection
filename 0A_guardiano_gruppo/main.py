@@ -34,6 +34,7 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GEMINI_MAX_CALLS_PER_MONTH = int(os.getenv("GEMINI_MAX_CALLS_PER_MONTH", "1000"))
 
 whitelist_raw = os.getenv("WHITELIST_IDS", "")
 ENV_WHITELIST_IDS = [int(x.strip()) for x in whitelist_raw.split(",") if x.strip()]
@@ -110,6 +111,13 @@ async def init_db(db: aiosqlite.Connection) -> None:
             PRIMARY KEY (user_id, chat_id)
         )
     """)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS ai_usage (
+            month TEXT PRIMARY KEY,
+            count INTEGER DEFAULT 0
+        )
+    """)
+
     await db.commit()
     logger.info("Database SQLite verificato/inizializzato.")
 
@@ -212,6 +220,22 @@ def build_settings_keyboard(settings: dict) -> InlineKeyboardMarkup:
             InlineKeyboardButton("❌ Chiudi Pannello", callback_data="close_settings")
         ]
     ])
+
+async def check_and_increment_ai_usage(db: aiosqlite.Connection) -> bool:
+    month_key = datetime.now().strftime("%Y-%m")
+    async with db.execute("SELECT count FROM ai_usage WHERE month = ?", (month_key,)) as cur:
+        row = await cur.fetchone()
+        current = row[0] if row else 0
+
+    if current >= GEMINI_MAX_CALLS_PER_MONTH:
+        return False
+
+    await db.execute(
+        "INSERT INTO ai_usage (month, count) VALUES (?, 1) ON CONFLICT(month) DO UPDATE SET count = count + 1",
+        (month_key,)
+    )
+    await db.commit()
+    return True
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
@@ -497,6 +521,14 @@ async def check_verification(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
             await context.bot.unban_chat_member(chat_id=chat_id, user_id=user_id)
             await send_log(context, f"KICK TIMEOUT: {first_name} (ID: {user_id}) rimosso per timeout verifica.")
+            if ADMIN_CHAT_ID:
+                try:
+                    await context.bot.send_message(
+                        chat_id=ADMIN_CHAT_ID,
+                        text=f"⚠️ {first_name} (ID: {user_id}) è stato rimosso dal gruppo {chat_id} per mancata verifica."
+                    )
+                except Exception as e:
+                    logger.warning(f"Impossibile notificare admin privatamente: {e}")
         except BadRequest as e:
             logger.error(f"Impossibile kickare utente per timeout: {e}")
     else:
@@ -595,11 +627,14 @@ async def handle_incoming_messages(update: Update, context: ContextTypes.DEFAULT
     if settings.get("filter_ai") and ai_client and len(text) > 15:
         triggers = ["crypto", "guadagn", "invest", "bonus", "dm me", "t.me", "telegram", "promo"]
         if any(trig in text_lower for trig in triggers):
-            if await analyze_with_gemini(text):
-                try:
-                    await msg.delete()
-                except BadRequest:
-                    pass
+            if await check_and_increment_ai_usage(db):
+                if await analyze_with_gemini(text):
+                    try:
+                        await msg.delete()
+                    except BadRequest:
+                        pass
+            else:
+                logger.warning("Limite mensile chiamate Gemini raggiunto, filtro AI saltato per questo messaggio.")
 
 async def post_init(application: Application) -> None:
     db = await aiosqlite.connect(DB_FILE)

@@ -38,13 +38,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"Ricevuto messaggio: '{testo_utente}' da {update.message.from_user.first_name}")
     
-    if testo_utente == "Domande Frequenti ❓":
+    if testo_utente == "Domande frequenti":
         await update.message.reply_text("Hai scelto le FAQ! Presto collegheremo questa sezione al database.")
         
-    elif testo_utente == "Contatta un Umano 🙋‍♂️":
+    elif testo_utente == "Contatta un umano":
         await update.message.reply_text("Richiesta di assistenza registrata. Inoltro al proprietario in corso...")
         
-    elif testo_utente == "Orari e Info 🕒":
+    elif testo_utente == "Orari e Info":
         await update.message.reply_text("Siamo operativi tutti i giorni, pronti a risponderti.")
         
     else:

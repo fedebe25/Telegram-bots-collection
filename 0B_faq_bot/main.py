@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-logging.logger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 load_dotenv()
 
